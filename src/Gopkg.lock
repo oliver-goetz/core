@@ -2,7 +2,7 @@
 
 
 [[projects]]
-  digest = "1:a6ff649b3e966ee4bca9cec9bac6a6d6df8f00b53561b344b730ab52aba81a2d"
+  digest = "1:b7bd5c8d6493510926bb77cae68b52afcd99ce650f7d59a7fd7932cc427f6417"
   name = "cloud.google.com/go"
   packages = [
     "compute/metadata",
@@ -13,9 +13,6 @@
     "internal/tracecontext",
     "internal/version",
     "monitoring/apiv3",
-    "pubsub",
-    "pubsub/apiv1",
-    "pubsub/internal/distribution",
     "storage",
     "trace",
     "trace/apiv2",
@@ -540,13 +537,11 @@
   revision = "42c35bdb11c20ff50bb14ef05750e8dcdfc75ea5"
 
 [[projects]]
-  digest = "1:ac6e658516a8b73fdf62b375a93445d4b768548774940dcedd112d5d30e37015"
+  digest = "1:450495ee4de4bf794a5c92db6530c9248227031a69beca1382454ca41b0f92ca"
   name = "github.com/onsi/gomega"
   packages = [
     ".",
     "format",
-    "gstruct",
-    "gstruct/errors",
     "internal/assertion",
     "internal/asyncassertion",
     "internal/oraclematcher",
@@ -1488,7 +1483,6 @@
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
-    "cloud.google.com/go/pubsub",
     "cloud.google.com/go/storage",
     "cloud.google.com/go/trace",
     "github.com/cenkalti/backoff",
@@ -1506,7 +1500,6 @@
     "github.com/jhump/protoreflect/dynamic",
     "github.com/motemen/go-loghttp",
     "github.com/onsi/gomega",
-    "github.com/onsi/gomega/gstruct",
     "github.com/pkg/errors",
     "github.com/prometheus/client_golang/prometheus",
     "github.com/prometheus/client_golang/prometheus/promhttp",
@@ -1527,7 +1520,6 @@
     "golang.org/x/oauth2/jwt",
     "golang.org/x/sync/errgroup",
     "google.golang.org/api/cloudresourcemanager/v1",
-    "google.golang.org/api/iterator",
     "google.golang.org/api/option",
     "google.golang.org/genproto/googleapis/pubsub/v1",
     "google.golang.org/grpc",
@@ -1536,7 +1528,6 @@
     "google.golang.org/grpc/status",
     "google.golang.org/protobuf/runtime/protoiface",
     "gopkg.in/h2non/gock.v1",
-    "gopkg.in/yaml.v2",
     "k8s.io/api/apps/v1",
     "k8s.io/api/core/v1",
     "k8s.io/api/rbac/v1",
