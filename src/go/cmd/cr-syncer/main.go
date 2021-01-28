@@ -69,10 +69,10 @@ import (
 )
 
 const (
-	// Resync informers every 5 minutes. This will cause all current resources
+	// Resync informers every 1 minutes. This will cause all current resources
 	// to be sent as updates once again, which will trigger reconciliation on those
 	// objects and thus fix any potential drift.
-	resyncPeriod = 5 * time.Minute
+	resyncPeriod = 1 * time.Minute
 )
 
 var (
