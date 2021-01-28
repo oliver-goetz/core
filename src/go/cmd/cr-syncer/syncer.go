@@ -20,6 +20,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"go.opencensus.io/stats"
 	"go.opencensus.io/stats/view"
@@ -171,8 +172,8 @@ func newCRSyncer(
 		subtree:         annotations[annotationStatusSubtree],
 		upstream:        remote.Resource(gvr).Namespace(ns),
 		downstream:      local.Resource(gvr).Namespace(ns),
-		upstreamQueue:   workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "upstream"),
-		downstreamQueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "downstream"),
+		upstreamQueue:   workqueue.NewNamedRateLimitingQueue(workqueue.NewItemFastSlowRateLimiter(time.Millisecond*500, time.Second*5, 5), "upstream"),
+		downstreamQueue: workqueue.NewNamedRateLimitingQueue(workqueue.NewItemFastSlowRateLimiter(time.Millisecond*500, time.Second*5, 5), "downstream"),
 		done:            make(chan struct{}),
 	}
 	switch src := annotations[annotationSpecSource]; src {
