@@ -325,6 +325,13 @@ func (s *crSyncer) stop() {
 	close(s.done)
 }
 
+// jsonPatch provides a JSON patch conform structure for add and replace. Please see: https://tools.ietf.org/html/rfc6902
+type jsonPatchAddReplace struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value"`
+}
+
 // syncDownstream reconciles state after receiving change events from the
 // downstream cluster. It synchronizes the status from the downstream to the
 // upstream cluster, and deletes orphaned downstream resources.
@@ -384,14 +391,15 @@ func (s *crSyncer) syncDownstream(key string) error {
 		}
 	}
 
-	dst := &unstructured.Unstructured{map[string]interface{}{}}
+	dst := dstObj.(*unstructured.Unstructured).DeepCopy()
+	dst.Object["status"] = status
 	setAnnotation(dst, annotationResourceVersion, src.GetResourceVersion())
 
-	patchData := make([]map[string]interface{}, 0, 2)
-	patchData = append(patchData, map[string]interface{}{
-		"op":    "add",
-		"path":  "/metadata/annotations",
-		"value": dst.GetAnnotations(),
+	patchData := make([]jsonPatchAddReplace, 0, 2)
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/metadata/annotations",
+		Value: dst.GetAnnotations(),
 	})
 
 	// We need to make a dedicated UpdateStatus call if the status is defined
@@ -402,16 +410,16 @@ func (s *crSyncer) syncDownstream(key string) error {
 			status = struct{}{}
 		}
 		if s.subtree == "" || status == struct{}{} {
-			patchData = append(patchData, map[string]interface{}{
-				"op":    "add",
-				"path":  "/status",
-				"value": status,
+			patchData = append(patchData, jsonPatchAddReplace{
+				Op:    "add",
+				Path:  "/status",
+				Value: status,
 			})
 		} else {
-			patchData = append(patchData, map[string]interface{}{
-				"op":    "add",
-				"path":  fmt.Sprintf("/status/%s", s.subtree),
-				"value": status,
+			patchData = append(patchData, jsonPatchAddReplace{
+				Op:    "add",
+				Path:  fmt.Sprintf("/status/%s", s.subtree),
+				Value: status,
 			})
 		}
 		patchDataJSON, err := json.Marshal(patchData)
@@ -425,16 +433,16 @@ func (s *crSyncer) syncDownstream(key string) error {
 		dst = updated
 	} else {
 		if s.subtree == "" || status == nil {
-			patchData = append(patchData, map[string]interface{}{
-				"op":    "add",
-				"path":  "/status",
-				"value": status,
+			patchData = append(patchData, jsonPatchAddReplace{
+				Op:    "add",
+				Path:  "/status",
+				Value: status,
 			})
 		} else {
-			patchData = append(patchData, map[string]interface{}{
-				"op":    "add",
-				"path":  fmt.Sprintf("/status/%s", s.subtree),
-				"value": status,
+			patchData = append(patchData, jsonPatchAddReplace{
+				Op:    "add",
+				Path:  fmt.Sprintf("/status/%s", s.subtree),
+				Value: status,
 			})
 		}
 		patchDataJSON, err := json.Marshal(patchData)
@@ -496,7 +504,17 @@ func (s *crSyncer) syncUpstream(key string) error {
 	case srcExists && dstExists:
 		// Update dst.
 		createOrUpdate = func(o *unstructured.Unstructured) (*unstructured.Unstructured, error) {
-			return s.downstream.Update(o, metav1.UpdateOptions{})
+			patchData := make([]jsonPatchAddReplace, 0, 1)
+			patchData = append(patchData, jsonPatchAddReplace{
+				Op:    "add",
+				Path:  "/spec",
+				Value: o.Object["spec"],
+			})
+			patchDataJSON, err := json.Marshal(patchData)
+			if err != nil {
+				return nil, newAPIErrorf(dst, "Marshalling JSON failed: %s", err)
+			}
+			return s.downstream.Patch(o.GetName(), types.JSONPatchType, patchDataJSON, metav1.PatchOptions{})
 		}
 	case !srcExists && dstExists:
 		// Delete dst.

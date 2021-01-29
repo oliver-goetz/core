@@ -15,6 +15,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	k8sfake "k8s.io/client-go/dynamic/fake"
 	k8stest "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
@@ -137,6 +139,8 @@ func sprintAction(a k8stest.Action) string {
 		return fmt.Sprintf("CREATE %s/%s %s/%s: %v", v.Resource, v.Subresource, v.Namespace, v.Name, v.Object.(*unstructured.Unstructured))
 	case k8stest.UpdateActionImpl:
 		return fmt.Sprintf("UPDATE %s/%s %s: %v", v.Resource, v.Subresource, v.Namespace, v.Object.(*unstructured.Unstructured))
+	case k8stest.PatchActionImpl:
+		return fmt.Sprintf("PATCH %s/%s %s %s: %v", v.Resource, v.Subresource, v.Namespace, v.PatchType, string(v.Patch[:]))
 	default:
 		return fmt.Sprintf("<UNKNOWN ACTION %T>", a)
 	}
@@ -267,7 +271,18 @@ func TestSyncUpstream_updateSpec(t *testing.T) {
 		tcrLocalNew = newTestCR("resource1", "spec2", "status2")
 	)
 
-	f.expectLocalActions(k8stest.NewUpdateAction(gvr, "default", tcrLocalNew))
+	patchData := make([]jsonPatchAddReplace, 0, 1)
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/spec",
+		Value: tcrLocalNew.Object["spec"],
+	})
+	patchDataJSON, err := json.Marshal(patchData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.expectLocalActions(k8stest.NewPatchAction(gvr, "default", tcrLocalNew.GetName(), types.JSONPatchType, patchDataJSON))
 	f.verifyWriteActions()
 }
 
@@ -349,7 +364,70 @@ func TestSyncDownstream_statusFull(t *testing.T) {
 		annotationResourceVersion: "123",
 	})
 
-	f.expectRemoteActions(k8stest.NewUpdateAction(gvr, "default", tcrRemoteNew))
+	patchData := make([]jsonPatchAddReplace, 0, 2)
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/metadata/annotations",
+		Value: tcrRemoteNew.GetAnnotations(),
+	})
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/status",
+		Value: tcrRemoteNew.Object["status"],
+	})
+	patchDataJSON, err := json.Marshal(patchData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.expectRemoteActions(k8stest.NewPatchAction(gvr, "default", tcrRemoteNew.GetName(), types.JSONPatchType, patchDataJSON))
+	f.verifyWriteActions()
+}
+
+func TestSyncDownstream_statusSubresource(t *testing.T) {
+	crd := testCRD(crdtypes.NamespaceScoped)
+	crd.Spec.Subresources = &crdtypes.CustomResourceSubresources{Status: &crdtypes.CustomResourceSubresourceStatus{}}
+	f := newFixture(t)
+
+	var (
+		tcrLocal  = newTestCR("resource1", "spec1", "status2")
+		tcrRemote = newTestCR("resource1", "spec1", "status1")
+	)
+	tcrLocal.SetResourceVersion("123")
+
+	f.addLocalObjects(tcrLocal)
+	f.addRemoteObjects(tcrRemote)
+
+	crs, gvr := f.newCRSyncer(crd, "")
+	defer crs.stop()
+
+	crs.startInformers()
+	if err := crs.syncDownstream("default/resource1"); err != nil {
+		t.Fatal(err)
+	}
+
+	tcrRemoteNew := newTestCR("resource1", "spec1", "status2")
+	tcrRemoteNew.SetAnnotations(map[string]string{
+		annotationResourceVersion: "123",
+	})
+
+	patchData := make([]jsonPatchAddReplace, 0, 2)
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/metadata/annotations",
+		Value: tcrRemoteNew.GetAnnotations(),
+	})
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/status",
+		Value: tcrRemoteNew.Object["status"],
+	})
+	patchDataJSON, err := json.Marshal(patchData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.expectRemoteActions(k8stest.NewPatchSubresourceAction(gvr, "default", tcrRemoteNew.GetName(), types.JSONPatchType, patchDataJSON, "status"))
 	f.verifyWriteActions()
 }
 
@@ -389,7 +467,80 @@ func TestSyncDownstream_statusSubtree(t *testing.T) {
 		annotationResourceVersion: "123",
 	})
 
-	f.expectRemoteActions(k8stest.NewUpdateAction(gvr, "default", tcrRemoteNew))
+	patchData := make([]jsonPatchAddReplace, 0, 2)
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/metadata/annotations",
+		Value: tcrRemoteNew.GetAnnotations(),
+	})
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/status/robot",
+		Value: tcrRemoteNew.Object["status"].(map[string]interface{})["robot"],
+	})
+	patchDataJSON, err := json.Marshal(patchData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.expectRemoteActions(k8stest.NewPatchAction(gvr, "default", tcrRemoteNew.GetName(), types.JSONPatchType, patchDataJSON))
+	f.verifyWriteActions()
+}
+
+func TestSyncDownstream_statusSubtreeSubresource(t *testing.T) {
+	crd := testCRD(crdtypes.NamespaceScoped)
+	crd.Spec.Subresources = &crdtypes.CustomResourceSubresources{Status: &crdtypes.CustomResourceSubresourceStatus{}}
+	f := newFixture(t)
+
+	var (
+		tcrLocal = newTestCR("resource1", "spec1", map[string]interface{}{
+			"cloud": "cloud_1",
+			"robot": "robot_2",
+		})
+		tcrRemote = newTestCR("resource1", "spec1", map[string]interface{}{
+			"cloud": "cloud_2",
+			"robot": "robot_1",
+		})
+	)
+	tcrLocal.SetResourceVersion("123")
+
+	f.addLocalObjects(tcrLocal)
+	f.addRemoteObjects(tcrRemote)
+
+	crs, gvr := f.newCRSyncer(crd, "")
+	defer crs.stop()
+
+	crs.subtree = "robot"
+	crs.startInformers()
+	if err := crs.syncDownstream("default/resource1"); err != nil {
+		t.Fatal(err)
+	}
+
+	tcrRemoteNew := newTestCR("resource1", "spec1", map[string]interface{}{
+		"cloud": "cloud_2",
+		"robot": "robot_2",
+	})
+	tcrRemoteNew.SetAnnotations(map[string]string{
+		annotationResourceVersion: "123",
+	})
+
+	patchData := make([]jsonPatchAddReplace, 0, 2)
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/metadata/annotations",
+		Value: tcrRemoteNew.GetAnnotations(),
+	})
+	patchData = append(patchData, jsonPatchAddReplace{
+		Op:    "add",
+		Path:  "/status/robot",
+		Value: tcrRemoteNew.Object["status"].(map[string]interface{})["robot"],
+	})
+	patchDataJSON, err := json.Marshal(patchData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.expectRemoteActions(k8stest.NewPatchSubresourceAction(gvr, "default", tcrRemoteNew.GetName(), types.JSONPatchType, patchDataJSON, "status"))
 	f.verifyWriteActions()
 }
 
